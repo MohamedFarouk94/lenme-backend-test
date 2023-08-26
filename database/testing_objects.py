@@ -30,6 +30,17 @@ def add_users():
 	return [alice, bob, carol, dave, eve], [alice_key, bob_key, carol_key, dave_key, eve_key]
 
 
+'''
+tokens:
+{'alice': '74801e014c99da0e93fd71038e200c6a454d2a1d',
+ 'bob': '69d7f16f0783564d84321c4eb1b205c8013852df',
+ 'carol': 'b678f09aefbce591d65da1cb98de1878ed5e3216',
+ 'dave': 'b21b3f49d8a0479667123d5edc499c416979e152',
+ 'eve': '881159bd473a5dabf688f1dff83f49949de2bf78'}
+
+'''
+
+
 def delete_users():
 	for user in User.objects.all():
 		user.delete()

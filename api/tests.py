@@ -2,6 +2,11 @@ import unittest
 import requests
 
 
+'''
+the objects in database before testing are in database/testing_objects
+'''
+
+
 class TestAPI(unittest.TestCase):
 	def test_helloWorld(self):
 		url = 'http://127.0.0.1:8000/'
