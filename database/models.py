@@ -1,61 +1,39 @@
 from django.db import models
+from django.contrib.auth.models import User
+from database.financial_operations import calculate_financial_data, do_transiction
+from datetime import datetime
 
 
 # Create your models here.
-class Investor(models.Model):
+class Person(models.Model):
+	user = models.OneToOneField(User, on_delete=models.CASCADE)
+	credit = models.FloatField(default=0)
+
+	def can_afford(self, amount):
+		return self.credit >= amount
+
+	def update_credit(self, amount):
+		self.credit += amount
+		self.save()
+
+	def to_dict(self):
+		return {
+			'id': self.user.id,
+			'first-name': self.user.first_name,
+			'last-name': self.user.last_name,
+			'username': self.user.username,
+			'email': self.user.email,
+			'date-joined': self.user.date_joined,
+			'credit': self.credit,
+		}
+
+
+class Investor(Person):
 	plural = 'investors'
-	id = models.AutoField(primary_key=True)
-	first_name = models.CharField(max_length=20)
-	second_name = models.CharField(max_length=20)
-	user_name = models.CharField(max_length=50, unique=True)
-	email = models.EmailField(max_length=256, unique=True)
-	birth_date = models.DateField(null=True)
-	address = models.CharField(max_length=256, blank=True)
-	credit = models.FloatField(default=0)
-	account_created = models.DateTimeField(auto_now_add=True)
-	# api_key_hashed = models.CharField(max_length=15, unique=True)
-
-	def save(self, *awargs, **kwargs):
-		super(Investor, self).save(*awargs, **kwargs)
-
-	def to_dict(self):
-		return {
-			'id': self.id,
-			'First Name': self.first_name,
-			'Second Name': self.second_name,
-			'user_name': self.user_name,
-			'email': self.email,
-			'account_created': self.account_created,
-			'credit': self.credit,
-		}
 
 
-class Borrower(models.Model):
+class Borrower(Person):
 	plural = 'borrowers'
-	id = models.AutoField(primary_key=True)
-	first_name = models.CharField(max_length=20)
-	second_name = models.CharField(max_length=20)
-	user_name = models.CharField(max_length=50, unique=True)
-	email = models.EmailField(max_length=256, unique=True)
-	birth_date = models.DateField(null=True)
-	address = models.CharField(max_length=256, blank=True)
-	credit = models.FloatField(default=0)
-	account_created = models.DateTimeField(auto_now_add=True)
-	# api_key_hashed = models.CharField(max_length=15, unique=True)
-
-	def save(self, *awargs, **kwargs):
-		super(Borrower, self).save(*awargs, **kwargs)
-
-	def to_dict(self):
-		return {
-			'id': self.id,
-			'First Name': self.first_name,
-			'Second Name': self.second_name,
-			'user_name': self.user_name,
-			'email': self.email,
-			'account_created': self.account_created,
-			'credit': self.credit,
-		}
 
 
 class Loan(models.Model):
@@ -67,25 +45,60 @@ class Loan(models.Model):
 	borrower = models.ForeignKey(Borrower, on_delete=models.CASCADE)
 	investor = models.ForeignKey(Investor, null=True, on_delete=models.SET_NULL)
 	annual_interest = models.FloatField(null=True)
-	loan_created = models.DateTimeField(auto_now_add=True)
-	loan_funded = models.DateTimeField(null=True)
+	date_created = models.DateTimeField(auto_now_add=True)
+	date_funded = models.DateTimeField(null=True)
 	status = models.CharField(max_length=10, choices=[("Pending", "Pending"), ("Funded", "Funded"), ("Completed", "Completed"), ("Problem", "Problem")], default='Pending')
 
-	def save(self, *awargs, **kwargs):
-		super(Loan, self).save(*awargs, **kwargs)
+	def get_offers(self):
+		return [offer.to_dict() for offer in Offer.objects.filter(loan=self)]
+
+	def funded(self, investor, annual_interest):
+		self.status = 'Funded'
+		self.investor = investor
+		self.annual_interest = annual_interest
+		do_transiction(self.amount, giver=self.investor, reciever=self.borrower)
+		do_transiction(self.fee, giver=self.investor)
+		self.investor.save()
+		self.borrower.save()
+		self.save()
+
+	# Check if it's the time to repay
+	def attempt_complete(self):
+		if self.date_funded + self.period < datetime.now() or self.status != 'Funded':
+			return 0
+
+		total_deserved = self.to_dict()['total-deserved']
+		if not self.borrower.can_afford(total_deserved):
+			self.status = 'Problem'
+			return -1
+
+		self.status = 'Complete'
+		do_transiction(total_deserved, giver=self.borrower, reciever=self.investor)
+		return 1
+
+	def calculate_financial_data(self):
+		if self.status == 'Funded':
+			return calculate_financial_data(self.amount, self.annual_interest, self.period)
+		return None, None
 
 	def to_dict(self):
+		interest, deserved = self.calculate_financial_data()
 		return {
 			'id': self.id,
 			'amount': self.amount,
-			'period': self.period,
+			'period': self.period.days,
 			'fee': self.fee,
-			'borrower': self.borrower.id,
-			'investor': self.investor.id if self.investor else 'N/A',
-			'annual interest': self.annual_interest if self.annual_interest else 'N/A',
-			'loan created': self.loan_created,
-			'loan_funded': self.loan_funded if self.loan_funded else 'N/A',
-			'status': self.status
+			'borrower': self.borrower.user.id,
+			'borrower-username': self.borrower.user.username,
+			'investor': self.investor.user.id if self.investor else 'N/A',
+			'investor-username': self.investor.user.username if self.investor else 'N/A',
+			'annual-interest': self.annual_interest if self.annual_interest else 'N/A',
+			'date-created': self.date_created,
+			'date-funded': self.date_funded if self.date_funded else 'N/A',
+			'offers-ids': [offer['id'] for offer in self.get_offers()],
+			'total-interest': interest if interest else 'N/A',
+			'total-deserved': deserved if deserved else 'N/A',
+			'status': self.status,
 		}
 
 
@@ -96,19 +109,42 @@ class Offer(models.Model):
 	loan = models.ForeignKey(Loan, on_delete=models.CASCADE)
 	annual_interest = models.FloatField()
 	status = models.CharField(max_length=10, choices=[("Pending", "Pending"), ("Declined", "Declined"), ("Accepted", "Accepted")], default='Pending')
-	offer_created = models.DateTimeField(auto_now_add=True)
-	offer_concluded = models.DateTimeField(null=True)
+	date_created = models.DateTimeField(auto_now_add=True)
+	date_concluded = models.DateTimeField(null=True)
 
-	def save(self, *awargs, **kwargs):
-		super(Offer, self).save(*awargs, **kwargs)
+	def calculate_financial_data(self):
+		interest, deserved = calculate_financial_data(self.loan.amount, self.annual_interest, self.loan.period)
+		return interest, deserved
+
+	def accept(self):
+		self.status = 'Accepted'
+		NOW = datetime.now()
+		self.date_concluded = NOW
+		self.loan.date_funded = NOW
+		self.loan.save()
+		self.save()
+		print('#ACCEPTED#')
+
+	def dcline(self):
+		self.status = 'Declined'
+		self.date_concluded = datetime.now()
+		self.save()
 
 	def to_dict(self):
+		interest, deserved = self.calculate_financial_data()
 		return {
 			'id': self.id,
-			'investor': self.investor.id,
+			'investor': self.investor.user.id,
+			'investor-username': self.investor.user.username,
+			'borrower': self.loan.borrower.user.id,
+			'borrower-username': self.loan.borrower.user.username,
 			'loan': self.loan.id,
-			'annual interest': self.annual_interest,
-			'offer_created': self.offer_created,
-			'offer_concluded': self.offer_concluded if self.offer_concluded else 'N/A',
+			'amount': self.loan.amount,
+			'period': self.loan.period.days,
+			'annual-interest': self.annual_interest,
+			'date-created': self.date_created,
+			'date-concluded': self.date_concluded if self.date_concluded else 'N/A',
+			'total-interest': interest,
+			'total-deserved': deserved,
 			'status': self.status
 		}
