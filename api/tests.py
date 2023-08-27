@@ -62,8 +62,8 @@ class TestAPI(unittest.TestCase):
 		carol_url = 'http://127.0.0.1:8000/investors/16'
 		alice = requests.get(alice_url).json()
 		carol = requests.get(carol_url).json()
-		self.assertEqual(alice['credit'], 6000)
-		self.assertEqual(carol['credit'], 997)
+		self.assertEqual(alice['credit'], 6000)	# she was 1000 (+5000)
+		self.assertEqual(carol['credit'], 997)	# she was 6000 (-5003)
 
 		# A scheduler should call the method loan.attampt_complete() in database/models.Loan
 		# to find if it's the time for the borrower to pay the deserved money to the investor.
