@@ -64,3 +64,6 @@ class TestAPI(unittest.TestCase):
 		carol = requests.get(carol_url).json()
 		self.assertEqual(alice['credit'], 6000)
 		self.assertEqual(carol['credit'], 997)
+
+		# A scheduler should call the method loan.attampt_complete() in database/models.Loan
+		# to find if it's the time for the borrower to pay the deserved money to the investor.
